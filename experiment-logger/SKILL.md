@@ -7,27 +7,29 @@ description: 实验日志强制记录 Skill。当 agent 开始训练/评测/复�
 
 以下约束为命令式，优先级高于本文件中其它一切内容：
 
-1. **实验开始前，你必须先登记目标**：哪篇论文、哪张表/图、期望指标。未登记不得开跑。
-2. **做出任何非显然选择时（换版本、跳步骤、改参数、换数据），你必须立即写一条决策记录。**
-3. **任何报错后重试之前，你必须先写一条 failed_attempt，再继续。**
-4. **实验结束时，你必须运行 finalize 生成双日志。finalize 未完成，实验就不算结束。**
-5. **记录失败时，你不得中断实验。打印一行警告后继续实验，结束时补记。**
-6. **人版和 agent 版必须由同一份 canonical 记录渲染生成，严禁分别手写。**
-7. **人版严禁出现完整命令、环境细节、失败过程。这些只属于 agent 版。**
+1. **实验开始前，你必须先确认日志存放根目录**：首次使用时必须询问用户并记住该默认目录；后续实验默认复用，仅在用户要求更换时重新询问。未确认目录前不得开跑。
+2. **实验开始前，你必须先登记目标**：哪篇论文、哪张表/图、期望指标。未登记不得开跑。
+3. **做出任何非显然选择时（换版本、跳步骤、改参数、换数据），你必须立即写一条决策记录。**
+4. **任何报错后重试之前，你必须先写一条 failed_attempt，再继续。**
+5. **实验结束时，你必须运行 finalize 生成双日志并更新全局索引。finalize 未完成，实验就不算结束。**
+6. **记录失败时，你不得中断实验。打印一行警告后继续实验，结束时补记。**
+7. **人版和 agent 版必须由同一份 canonical 记录渲染生成，严禁分别手写。**
+8. **人版严禁出现完整命令、环境细节、失败过程。这些只属于 agent 版。**
 
 ---
 
 ## 本 Skill 如何保证 agent 时刻记得记录
 
-记录是 agent 行为的强制环节，不是可选功能。本 Skill 通过五个强制检查点把记录织入实验工作流，而不是依赖 agent 自觉：
+记录是 agent 行为的强制环节，不是可选功能。本 Skill 通过六个强制检查点把记录织入实验工作流，而不是依赖 agent 自觉：
 
 | 检查点 | 时机 | agent 必须做什么 | 未做的后果 |
 |---|---|---|---|
-| 开跑前 | 任何实验脚本执行前 | 创建 canonical 记录，登记复现目标 | 不得开跑（或至少显式输出"跳过登记"的警告） |
+| 确认日志目录 | 首次使用 / 用户要求更换时 | 询问用户日志根目录并记住默认（写入 `~/.experiment-logger/log_root.txt`） | 不得开跑 |
+| 开跑前 | 任何实验脚本执行前 | 确认日志根目录（复用默认），创建 canonical 记录，登记复现目标 | 不得开跑（或至少显式输出"跳过登记"的警告） |
 | 决策时 | 做出非显然选择时 | 追加一条 decision | finalize 时被检出为"决策缺失" |
 | 失败时 | 报错后、重试前 | 追加一条 failed_attempt | finalize 时被检出为"报错未记录" |
 | 心跳 | 长实验每隔约 30 分钟或每个 epoch/阶段结束 | 补记关键事件 | 结束日志不完整 |
-| 结束时 | 实验完成/中止 | 运行 finalize，渲染双日志 | 实验状态记为未完成 |
+| 结束时 | 实验完成/中止 | 运行 finalize，渲染双日志并更新全局索引 | 实验状态记为未完成 |
 
 提醒机制的三条设计原则：
 
@@ -58,18 +60,42 @@ description: 实验日志强制记录 Skill。当 agent 开始训练/评测/复�
 
 验收标准：另一个 agent 仅凭 agent 版日志即可重建实验配置。
 
+## 日志存放与组织
+
+日志是用户的历史资产，存放位置必须由用户掌控：
+
+- **日志根目录（log_root）由用户指定**。agent 首次使用本 Skill 时，必须先询问用户日志根目录，并将回答写入 `~/.experiment-logger/log_root.txt` 作为默认值；之后所有实验默认复用该目录，仅在用户要求更换时重新询问并覆盖默认。
+- **每次实验一个独立子目录**，互不混写：
+
+```
+<log_root>/
+├── INDEX.md              # 全局索引，finalize 自动追加，一实验一行
+└── exp_20261103_1430/    # 单次实验目录
+    ├── record.json       # canonical 记录（单一事实源）
+    ├── human.md          # 人版日志（渲染产物）
+    └── agent.md          # agent 版日志（渲染产物）
+```
+
+- **INDEX.md 由 finalize 自动维护**，每行含日期、实验 ID、标题、状态、核心指标摘要、指向该实验 human.md 的相对链接。历史浏览看索引，可复现看单次目录，禁止手工往单次日志里追加跨实验内容。
+
 ## 使用接口
 
 canonical 记录结构见 `schema/record.schema.json`。
 
-### 1. 开跑前：创建记录
+### 1. 开跑前：确认日志目录并创建记录
 
 ```bash
-python scripts/render.py init --out runs/exp_20261103_1430/record.json \
-  --paper "Attention Is All You Need" --target "Table 2 / BLEU 28.4" --title "复现 Transformer base"
+# 首次使用：询问用户日志根目录后，用 --save-default 记住默认
+python scripts/render.py init --log-root "D:\experiment-logs" --save-default \
+  --title "复现 Transformer base" --paper "Attention Is All You Need" \
+  --target "Table 2 / BLEU 28.4" --model "transformer-base" --dataset "wmt14"
+
+# 后续实验：省略 --log-root，脚本自动读取默认目录；无默认时脚本会提示 agent 先询问用户
+python scripts/render.py init \
+  --title "复现 Transformer base" --paper "Attention Is All You Need" --target "Table 2"
 ```
 
-或直接手写初始 JSON（必须包含 goal、status=running）。
+实验子目录由脚本自动创建为 `<log_root>/<实验ID>/record.json`，实验 ID 默认按时间生成，可用 `--exp-id` 指定。
 
 ### 2. 实验过程中：追加记录
 
@@ -83,21 +109,23 @@ python scripts/render.py add --record runs/exp_xxx/record.json \
   --type failed_attempt --content "CUDA OOM，batch 32->16 后重试"
 ```
 
-### 3. 实验结束时：finalize
+### 2. 实验结束时：finalize
 
 ```bash
-python scripts/finalize.py --record runs/exp_xxx/record.json \
-  --results runs/exp_xxx/results.json \
-  --out-dir runs/exp_xxx
+python scripts/finalize.py --record <log_root>/exp_xxx/record.json \
+  --results <log_root>/exp_xxx/results.json
 ```
+
+输出目录默认取 record.json 所在目录，log_root 默认取 record 内记录值，一般无需手动指定。
 
 finalize 会：
 
 1. 按 schema 校验记录完整性，列出所有缺失项（缺失决策、报错未记录、缺产物路径等）
 2. 渲染生成 `human.md` 与 `agent.md`
-3. 给出 PASS / WARN / FAIL 结论；FAIL 时 agent 必须补全后重跑 finalize
+3. 向 `<log_root>/INDEX.md` 追加一行摘要（日期、ID、标题、状态、核心指标、日志链接）
+4. 给出 PASS / WARN / FAIL 结论；FAIL 时 agent 必须补全后重跑 finalize
 
-### 4. 渲染（finalize 已含；单独重渲染）
+### 3. 渲染（finalize 已含；单独重渲染）
 
 ```bash
 python scripts/render.py render --record runs/exp_xxx/record.json --out-dir runs/exp_xxx

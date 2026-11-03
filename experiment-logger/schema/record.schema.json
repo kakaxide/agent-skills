@@ -39,6 +39,10 @@
       "enum": ["running", "success", "partial", "failed"],
       "description": "running=s进行中；success=达成目标；partial=部分达成；failed=失败"
     },
+    "log_root": {
+      "type": "string",
+      "description": "日志根目录（用户指定）。本次实验子目录与其所在 INDEX.md 的根"
+    },
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" },
 

@@ -16,10 +16,11 @@
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render import load_record, render  # noqa: E402
+from render import load_record, render, status_emoji  # noqa: E402
 
 
 def validate(record: dict, warnings: list, errors: list) -> None:
@@ -54,11 +55,42 @@ def validate(record: dict, warnings: list, errors: list) -> None:
         warnings.append(f"环境指纹缺失项: {', '.join(missing_env)}")
 
 
+def update_index(record: dict, exp_dir: Path, log_root: Path) -> None:
+    """向 <log_root>/INDEX.md 追加一行实验摘要（幂等：同实验 ID 先移除旧行再追加）。"""
+    index_path = log_root / "INDEX.md"
+    date = (record.get("updated_at") or "")[:10]
+    exp_id = record.get("experiment_id", exp_dir.name)
+    status = f"{status_emoji(record.get('status', ''))} {record.get('status', '')}"
+    metrics = record.get("results", {}).get("metrics") or {}
+    summary = "；".join(f"{k}={v}" for k, v in list(metrics.items())[:3]) or "-"
+    row = f"| {date} | {exp_id} | {record.get('title', '')} | {status} | {summary} | [日志](./{exp_id}/human.md) |"
+
+    header = (
+        "# 实验日志索引\n\n"
+        "由 experiment-logger finalize 自动维护，一实验一行；详情见各实验子目录。\n\n"
+        "| 日期 | 实验 ID | 标题 | 状态 | 核心指标 | 日志 |\n"
+        "|---|---|---|---|---|---|\n"
+    )
+    lines = []
+    if index_path.exists():
+        lines = index_path.read_text(encoding="utf-8").splitlines()
+        lines = [ln for ln in lines if not (ln.startswith("|") and f"| {exp_id} |" in ln)]
+    else:
+        lines = header.splitlines()
+    lines.append(row)
+    try:
+        index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"OK: index updated -> {index_path}")
+    except OSError as e:
+        print(f"WARN: index write failed ({e}), will backfill at next finalize", file=sys.stderr)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="实验 finalize：校验 + 渲染双日志")
     p.add_argument("--record", required=True, help="canonical record.json 路径")
     p.add_argument("--results", default="", help="results JSON 路径（可选，将合并进 record.results）")
     p.add_argument("--out-dir", default="", help="输出目录，默认与 record.json 同目录")
+    p.add_argument("--log-root", default="", help="日志根目录（INDEX.md 所在处），默认取 record.log_root")
     p.add_argument("--strict", action="store_true", help="FAIL 时以非零退出码结束")
     args = p.parse_args()
 
@@ -66,7 +98,7 @@ def main() -> None:
     record = load_record(record_path)
 
     if args.results:
-        res = json.loads(Path(args.results).read_text(encoding="utf-8"))
+        res = json.loads(Path(args.results).read_text(encoding="utf-8-sig"))
         record["results"].update(res)
         record["updated_at"] = record.get("updated_at")
 
@@ -76,6 +108,10 @@ def main() -> None:
 
     out_dir = Path(args.out_dir) if args.out_dir else record_path.parent
     render(record, out_dir)
+
+    log_root = Path(args.log_root) if args.log_root else Path(record.get("log_root") or out_dir.parent)
+    log_root.mkdir(parents=True, exist_ok=True)
+    update_index(record, out_dir, log_root)
 
     print("\n===== finalize 校验报告 =====")
     for e in errors:

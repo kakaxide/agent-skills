@@ -4,7 +4,8 @@
 
 ## 开跑前
 
-- [ ] 已创建 canonical 记录（`record.json`），包含 experiment_id 与 title
+- [ ] 日志根目录已确认：首次使用已询问用户并保存默认（`~/.experiment-logger/log_root.txt`）；后续实验复用默认，用户要求更换时才重新询问
+- [ ] 已创建 canonical 记录（`record.json`），包含 experiment_id 与 title，且位于 `<log_root>/<实验ID>/` 下
 - [ ] 已登记复现目标：哪篇论文（goal.paper）、哪张表/图（goal.target）、期望指标（goal.expected_metrics）
 - [ ] 未登记目标时不得开跑；如确需跳过，必须在对话中显式输出跳过声明
 
@@ -21,6 +22,7 @@
 - [ ] 已填写 results：核心指标 metrics、与论文/基线的对照 comparison（含偏差与出处）、一句话结论 summary
 - [ ] 已填写 artifacts：checkpoint / 日志 / 指标文件 / 配置 / 图的路径
 - [ ] 已运行 `scripts/finalize.py`，生成 human.md 与 agent.md
+- [ ] `<log_root>/INDEX.md` 已追加本次实验摘要行（日期、ID、标题、状态、核心指标、链接）
 - [ ] finalize 结论为 PASS（或 WARN 项已逐条确认可接受 / 已补全）
 - [ ] 人版一屏内可读出主要参数与效果，无命令、无环境细节、无失败过程
 - [ ] agent 版包含：环境指纹、完整命令、全量配置、数据溯源、代码 commit、全部失败尝试与决策、产物路径

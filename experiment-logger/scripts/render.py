@@ -3,9 +3,14 @@
 """实验日志渲染脚本。
 
 子命令：
-  init    创建 canonical 记录（record.json）
+  init    创建 canonical 记录（record.json），实验子目录位于日志根目录下
   add     向记录追加 decision / failed_attempt / event
   render  由 canonical 记录渲染 human.md 与 agent.md
+
+日志根目录（log_root）规则：
+  --log-root 显式指定 > ~/.experiment-logger/log_root.txt 中的默认值。
+  两者都没有时，脚本退出并提示 agent 先询问用户日志存放地址。
+  首次使用传 --save-default 可把日志根目录记为默认。
 
 仅使用标准库。
 """
@@ -17,10 +22,40 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = SKILL_DIR / "templates"
+CONFIG_FILE = Path.home() / ".experiment-logger" / "log_root.txt"
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def load_default_log_root():
+    if CONFIG_FILE.exists():
+        p = CONFIG_FILE.read_text(encoding="utf-8").strip()
+        return p or None
+    return None
+
+
+def save_default_log_root(log_root: Path) -> None:
+    try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(str(log_root), encoding="utf-8")
+        print(f"OK: default log root saved -> {CONFIG_FILE}")
+    except OSError as e:
+        print(f"WARN: failed to save default log root ({e})", file=sys.stderr)
+
+
+def resolve_log_root(explicit: str) -> Path:
+    if explicit:
+        return Path(explicit)
+    default = load_default_log_root()
+    if default:
+        return Path(default)
+    # 无默认目录：要求 agent 先询问用户，不得擅自决定存放位置
+    sys.exit(
+        "ACTION REQUIRED: 未设置日志根目录。请先询问用户日志希望存放在哪里，"
+        "然后用 --log-root <目录> --save-default 重新执行 init。"
+    )
 
 
 def load_record(path: Path) -> dict:
@@ -38,16 +73,22 @@ def save_record(record: dict, path: Path) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    out = Path(args.out)
+    log_root = resolve_log_root(args.log_root).expanduser().resolve()
+    if args.save_default:
+        save_default_log_root(log_root)
+    exp_id = args.exp_id or f"exp_{datetime.now().strftime('%Y%m%d_%H%M')}"
+    exp_dir = log_root / exp_id
+    out = exp_dir / "record.json"
     if out.exists():
         sys.exit(f"ERROR: record already exists: {out}")
     record = {
-        "experiment_id": out.parent.name or f"exp_{datetime.now().strftime('%Y%m%d_%H%M')}",
+        "experiment_id": exp_id,
         "title": args.title,
         "goal": {"paper": args.paper, "target": args.target or "", "expected_metrics": {}},
         "status": "running",
         "created_at": now(),
         "updated_at": now(),
+        "log_root": str(log_root),
         "params": {"model": args.model or "", "dataset": args.dataset or "", "hyperparameters": {}, "hardware": ""},
         "environment": {},
         "commands": [],
@@ -59,9 +100,10 @@ def cmd_init(args: argparse.Namespace) -> None:
         "results": {"metrics": {}, "comparison": [], "summary": ""},
         "artifacts": [],
     }
-    out.parent.mkdir(parents=True, exist_ok=True)
+    exp_dir.mkdir(parents=True, exist_ok=True)
     save_record(record, out)
     print(f"OK: record created -> {out}")
+    print(f"日志根目录: {log_root}（首次使用请与用户确认；更换位置请用 --log-root --save-default）")
     print("提醒：开跑前请确认已登记复现目标（paper/target）。")
 
 
@@ -209,8 +251,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description="实验日志渲染脚本（canonical 记录 -> 人版/agent 版）")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pi = sub.add_parser("init", help="创建 canonical 记录")
-    pi.add_argument("--out", required=True, help="record.json 输出路径")
+    pi = sub.add_parser("init", help="创建 canonical 记录（位于 <log_root>/<实验ID>/）")
+    pi.add_argument("--log-root", default="", help="日志根目录；省略则读取默认配置")
+    pi.add_argument("--save-default", action="store_true", help="把 --log-root 记为默认日志根目录")
+    pi.add_argument("--exp-id", default="", help="实验 ID，默认 exp_YYYYMMDD_HHMM")
     pi.add_argument("--title", required=True, help="实验标题")
     pi.add_argument("--paper", required=True, help="复现目标论文")
     pi.add_argument("--target", default="", help="论文中的表/图，如 Table 2")

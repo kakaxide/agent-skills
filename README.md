@@ -33,25 +33,39 @@ agent-skills/
 
 ### 快速上手
 
+日志是用户的历史资产：agent 首次使用时必须询问日志根目录并记住默认（存于 `~/.experiment-logger/log_root.txt`），之后每次实验在该根目录下建独立子目录，finalize 自动维护全局索引 `INDEX.md`。
+
 ```bash
-# 1. 开跑前登记复现目标（未登记不得开跑）
-python scripts/render.py init --out runs/exp_001/record.json \
+# 1. 首次使用：询问用户日志根目录后，--save-default 记住默认
+#    后续实验省略 --log-root，自动复用默认目录
+python scripts/render.py init --log-root "D:\experiment-logs" --save-default \
   --title "复现 XX 论文 Table 2" --paper "论文标题" --target "Table 2" \
   --model "resnet50" --dataset "ImageNet"
 
 # 2. 过程中记录决策与失败（报错后、重试前必须先记一条）
-python scripts/render.py add --record runs/exp_001/record.json \
+python scripts/render.py add --record <log_root>/exp_001/record.json \
   --type decision --content "PyTorch 2.1 降级到 2.0，对齐论文环境"
 
-# 3. 实验结束 finalize：校验完整性 + 生成 human.md / agent.md
-python scripts/finalize.py --record runs/exp_001/record.json --strict
+# 3. 实验结束 finalize：校验完整性 + 生成 human.md / agent.md + 更新 INDEX.md
+python scripts/finalize.py --record <log_root>/exp_001/record.json --strict
+```
+
+日志目录结构：
+
+```
+<log_root>/
+├── INDEX.md              # 全局索引，一实验一行，自动维护
+└── exp_20261103_1430/    # 单次实验目录
+    ├── record.json       # canonical 记录（单一事实源）
+    ├── human.md          # 人版日志
+    └── agent.md          # agent 版日志
 ```
 
 脚本仅依赖 Python 标准库，无需安装额外包。
 
 ### 强制提醒点
 
-开跑前登记 → 关键决策时记录 → 失败/重试时记录 → 周期性心跳补记 → 结束时 finalize。未记录不会阻塞实验，但会在 finalize 校验报告中暴露并要求补全。
+确认日志目录（首次询问并记住默认）→ 开跑前登记目标 → 关键决策时记录 → 失败/重试时记录 → 周期性心跳补记 → 结束时 finalize 并更新全局索引。未记录不会阻塞实验，但会在 finalize 校验报告中暴露并要求补全。
 
 详细行为约束见 [experiment-logger/SKILL.md](experiment-logger/SKILL.md)。
 
