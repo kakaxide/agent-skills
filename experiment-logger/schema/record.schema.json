@@ -1,0 +1,213 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "experiment-logger/record.schema.json",
+  "title": "实验日志 canonical 记录",
+  "description": "单一事实源。人版与 agent 版日志均由本记录渲染生成，禁止分别手写。",
+  "type": "object",
+  "required": ["experiment_id", "title", "goal", "status", "created_at", "updated_at", "params", "environment", "commands", "results", "artifacts"],
+  "properties": {
+    "experiment_id": {
+      "type": "string",
+      "description": "实验唯一 ID，建议格式 exp_YYYYMMDD_HHMM"
+    },
+    "title": {
+      "type": "string",
+      "description": "一句话实验标题"
+    },
+    "goal": {
+      "type": "object",
+      "description": "复现目标。开跑前必须登记。",
+      "required": ["paper"],
+      "properties": {
+        "paper": {
+          "type": "string",
+          "description": "目标论文标题或出处"
+        },
+        "target": {
+          "type": "string",
+          "description": "论文中的具体表/图/节，如 Table 2"
+        },
+        "expected_metrics": {
+          "type": "object",
+          "description": "论文报告的期望指标，键为指标名，值为数值",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["running", "success", "partial", "failed"],
+      "description": "running=s进行中；success=达成目标；partial=部分达成；failed=失败"
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+
+    "params": {
+      "type": "object",
+      "description": "关键参数。仅记录偏离默认/论文配置的项；建议不超过 10 项。人版只渲染此节。",
+      "required": ["model", "dataset"],
+      "properties": {
+        "model": { "type": "string" },
+        "dataset": { "type": "string" },
+        "hyperparameters": {
+          "type": "object",
+          "description": "核心超参，如 lr/batch_size/epochs",
+          "additionalProperties": true
+        },
+        "hardware": {
+          "type": "string",
+          "description": "硬件规模，如 4x A100 80G"
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "environment": {
+      "type": "object",
+      "description": "环境指纹。仅 agent 版渲染。",
+      "required": ["os", "python"],
+      "properties": {
+        "os": { "type": "string" },
+        "python": { "type": "string" },
+        "cuda": { "type": "string" },
+        "gpu": { "type": "string" },
+        "packages": {
+          "type": "object",
+          "description": "关键包及版本",
+          "additionalProperties": { "type": "string" }
+        },
+        "random_seed": { "type": ["integer", "string"] }
+      },
+      "additionalProperties": true
+    },
+
+    "commands": {
+      "type": "array",
+      "description": "完整命令序列（按执行顺序）。仅 agent 版渲染。",
+      "items": {
+        "type": "object",
+        "required": ["step", "command"],
+        "properties": {
+          "step": { "type": "integer" },
+          "command": { "type": "string" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+
+    "config": {
+      "type": "object",
+      "description": "全量配置（完整 config 文件内容或路径）。仅 agent 版渲染。",
+      "additionalProperties": true
+    },
+
+    "data_provenance": {
+      "type": "object",
+      "description": "数据溯源。仅 agent 版渲染。",
+      "properties": {
+        "source": { "type": "string", "description": "数据来源" },
+        "path": { "type": "string" },
+        "hash": { "type": "string" },
+        "preprocessing": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+
+    "code": {
+      "type": "object",
+      "description": "代码版本信息。仅 agent 版渲染。",
+      "properties": {
+        "repo": { "type": "string" },
+        "commit": { "type": "string" },
+        "branch": { "type": "string" },
+        "dirty_files": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+
+    "decisions": {
+      "type": "array",
+      "description": "非显然选择记录（换版本、跳步骤、改参数、换数据）。",
+      "items": {
+        "type": "object",
+        "required": ["time", "content"],
+        "properties": {
+          "time": { "type": "string", "format": "date-time" },
+          "content": { "type": "string", "description": "做了什么选择，为什么" },
+          "alternatives": { "type": "string", "description": "被放弃的方案" }
+        }
+      }
+    },
+
+    "failed_attempts": {
+      "type": "array",
+      "description": "每次报错/失败尝试一条。重试之前必须先写。",
+      "items": {
+        "type": "object",
+        "required": ["time", "content"],
+        "properties": {
+          "time": { "type": "string", "format": "date-time" },
+          "error": { "type": "string", "description": "关键报错信息" },
+          "content": { "type": "string", "description": "现象与处理方式" },
+          "resolution": { "type": "string", "description": "如何解决或绕过" }
+        }
+      }
+    },
+
+    "events": {
+      "type": "array",
+      "description": "心跳事件：长实验过程中阶段级关键事件。",
+      "items": {
+        "type": "object",
+        "required": ["time", "content"],
+        "properties": {
+          "time": { "type": "string", "format": "date-time" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+
+    "results": {
+      "type": "object",
+      "description": "效果。人版渲染 metrics 与 comparison。",
+      "required": ["metrics"],
+      "properties": {
+        "metrics": {
+          "type": "object",
+          "description": "核心指标，键为指标名",
+          "additionalProperties": { "type": ["number", "string"] }
+        },
+        "comparison": {
+          "type": "array",
+          "description": "与论文/基线的对照",
+          "items": {
+            "type": "object",
+            "required": ["metric", "ours", "reference"],
+            "properties": {
+              "metric": { "type": "string" },
+              "ours": { "type": ["number", "string"] },
+              "reference": { "type": ["number", "string"], "description": "论文/基线值" },
+              "delta": { "type": ["number", "string"], "description": "偏差" },
+              "source": { "type": "string", "description": "参考值出处，如 论文Table 2" }
+            }
+          }
+        },
+        "summary": { "type": "string", "description": "一句话结论（人版状态行的素材）" }
+      },
+      "additionalProperties": true
+    },
+
+    "artifacts": {
+      "type": "array",
+      "description": "产物路径（checkpoint、日志、指标文件等）。",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind"],
+        "properties": {
+          "path": { "type": "string" },
+          "kind": { "type": "string", "description": "如 checkpoint / log / metrics / config / plot" }
+        }
+      }
+    }
+  }
+}
