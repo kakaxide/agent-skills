@@ -43,6 +43,27 @@
       "type": "string",
       "description": "日志根目录（用户指定）。本次实验子目录与其所在 INDEX.md 的根"
     },
+    "project": {
+      "type": "object",
+      "description": "所属项目流程（可选）。挂到项目流程下的实验填写。",
+      "properties": {
+        "name": { "type": "string", "description": "项目名" },
+        "plan": { "type": "string", "description": "plan.json 路径" }
+      }
+    },
+    "milestones": {
+      "type": "array",
+      "description": "阶段小结：多阶段（训练→评测→分析→对照）实验每收束一个阶段记一条，人版渲染结论演进。",
+      "items": {
+        "type": "object",
+        "required": ["time", "name", "summary"],
+        "properties": {
+          "time": { "type": "string", "format": "date-time" },
+          "name": { "type": "string", "description": "阶段名，如 训练完成" },
+          "summary": { "type": "string", "description": "该阶段收束时的一句话小结" }
+        }
+      }
+    },
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" },
 
@@ -181,6 +202,11 @@
           "description": "核心指标，键为指标名",
           "additionalProperties": { "type": ["number", "string"] }
         },
+        "headline": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "上 INDEX 索引的核心指标名（按重要性排序，最多取前 3 个）。哪几个指标上索引是实验作者的决定，不由字典插入顺序决定。"
+        },
         "comparison": {
           "type": "array",
           "description": "与论文/基线的对照",
@@ -192,7 +218,20 @@
               "ours": { "type": ["number", "string"] },
               "reference": { "type": ["number", "string"], "description": "论文/基线值" },
               "delta": { "type": ["number", "string"], "description": "偏差" },
-              "source": { "type": "string", "description": "参考值出处，如 论文Table 2" }
+              "source": { "type": "string", "description": "参考值出处。人版只显示文件名/短出处，完整路径在 agent 版呈现" }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "description": "关键结论：失败原因分析、外部对照结论等结构化分析产出（区别于过程性的 events）。",
+          "items": {
+            "type": "object",
+            "required": ["conclusion"],
+            "properties": {
+              "conclusion": { "type": "string", "description": "一句话结论" },
+              "evidence": { "type": "string", "description": "依据（数据/现象/出处）" },
+              "confidence": { "type": "string", "enum": ["high", "medium", "low"], "description": "置信度" }
             }
           }
         },

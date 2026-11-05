@@ -6,18 +6,19 @@
 
 ```
 agent-skills/
-├── experiment-logger/     # 实验日志 Skill：强制 agent 在实验过程中记录
+├── experiment-logger/     # 项目实验全流程追踪：流程文档 + 双日志
 │   ├── SKILL.md           # 主文件：触发条件、强制提醒点、接口清单、行为约束
 │   ├── schema/
 │   │   └── record.schema.json   # canonical 记录结构（单一事实源）
 │   ├── templates/
 │   │   ├── human.md.tpl   # 人版日志模板（极简：主要参数 + 效果 + 一行状态）
-│   │   └── agent.md.tpl   # agent 版日志模板（可复现级别详尽）
+│   │   ├── agent.md.tpl   # agent 版日志模板（可复现级别详尽）
+│   │   └── plan.md.tpl    # 项目流程文档模板（步骤状态 + 小结 + 索引）
 │   ├── scripts/
-│   │   ├── render.py      # init / add / render：维护 canonical 记录并渲染双日志
+│   │   ├── render.py      # init/add/set/render/project/compare：维护 canonical 记录
 │   │   └── finalize.py    # 实验结束校验 + 渲染 + PASS/WARN/FAIL 结论
 │   └── references/
-│       └── checklist.md   # agent 自检清单：开跑前/中/结束各查什么
+│       └── checklist.md   # agent 自检清单：项目开始/开跑前/中/结束各查什么
 └── paper-explainer/       # 文献讲解 Skill：结合论文原图讲解论文
     ├── SKILL.md           # 主文件：防幻觉条款、多模态阀门、讲解风格约束
     ├── scripts/
@@ -29,52 +30,59 @@ agent-skills/
         └── figure-rules.md  # 图提取与配对规则、过滤阈值、降级策略
 ```
 
-## experiment-logger：实验日志 Skill
+## experiment-logger：项目实验全流程追踪 Skill
 
-核心定位：**持续提醒并约束 agent 在实验过程中记录实验**，记录是强制环节而非可选功能。产出双日志：
+核心定位：**流程文档 + 实验日志双层记录**。agent 接到项目/复现任务先建流程文档（PLAN.md），用户随时能看到做到哪一步、卡在哪里；每步实验产出双日志（人版极简，agent 版可复现），步骤完成后在 PLAN.md 上标记状态、写小结并索引实验记录。
 
-| 日志 | 受众 | 内容边界 |
+### 双层文档
+
+| 层 | 文件 | 内容 |
 |---|---|---|
-| 人版 human.md | 人 | 不超过 10 项主要参数、核心指标与基线对照、一行状态结论。一屏读完 |
-| agent 版 agent.md | agent | 环境指纹、完整命令、全量配置、数据溯源、commit、失败尝试、决策理由、产物路径 |
+| 流程文档 | PLAN.md | 步骤清单 + 状态（⬜🔄✅❌）+ 一句话结果小结 + 实验记录索引，由 plan.json 渲染 |
+| 人版日志 | human.md | ≤10 项主要参数、核心指标与基线对照、关键结论、一行状态。一屏读完 |
+| agent 版日志 | agent.md | 环境指纹、完整命令、全量配置、数据溯源、commit、失败尝试、决策、产物路径（含权重位置） |
 
-设计原则：人版做减法、agent 版做加法；两份日志由同一份 canonical 记录（record.json）渲染生成，从机制上禁止分别手写导致分叉。
+三层文档全部由脚本从 canonical 记录（plan.json / record.json）渲染生成，从机制上禁止手写分叉。
 
 ### 快速上手
 
-日志是用户的历史资产：agent 首次使用时必须询问日志根目录并记住默认（存于 `~/.experiment-logger/log_root.txt`），之后每次实验在该根目录下建独立子目录，finalize 自动维护全局索引 `INDEX.md`。
+日志根目录由用户掌控：agent 首次使用必须询问并记住默认（`~/.experiment-logger/log_root.txt`）。
 
 ```bash
-# 1. 首次使用：询问用户日志根目录后，--save-default 记住默认
-#    后续实验省略 --log-root，自动复用默认目录
-python scripts/render.py init --log-root "D:\experiment-logs" --save-default \
-  --title "复现 XX 论文 Table 2" --paper "论文标题" --target "Table 2" \
-  --model "resnet50" --dataset "ImageNet"
+# 1. 项目开始：建流程文档（复现类任务必须先做这步）
+python scripts/render.py project init --log-root "D:\experiment-logs" --save-default \
+  --name repro_act --title "复现 ACT 插入攻击" --paper "ACT 2025" --target "Table 2" \
+  --step "环境与数据准备:装环境" --step "训练基线:复现基线" --step "评测与分析:对照论文"
 
-# 2. 过程中记录决策与失败（报错后、重试前必须先记一条）
-python scripts/render.py add --record <log_root>/exp_001/record.json \
-  --type decision --content "PyTorch 2.1 降级到 2.0，对齐论文环境"
+# 2. 每步实验：创建记录（--project 挂到流程下）+ 过程记录（时间戳自动）
+python scripts/render.py init --project repro_act --exp-id exp_baseline \
+  --title "基线训练" --paper "ACT 2025" --target "Table 2" --model "resnet50" --dataset "ImageNet"
+python scripts/render.py add --record <record> --type failed_attempt --content "OOM" --error "CUDA out of memory"
+python scripts/render.py set --record <record> --key results.metrics.eval_success --value 0.867
+python scripts/render.py set --record <record> --key results.headline --value '["eval_success"]'   # INDEX 显示哪些指标由实验作者决定
 
-# 3. 实验结束 finalize：校验完整性 + 生成 human.md / agent.md + 更新 INDEX.md
-python scripts/finalize.py --record <log_root>/exp_001/record.json --strict
+# 3. 步骤收束：finalize + 更新流程文档（状态 + 小结 + 索引实验记录）
+python scripts/finalize.py --record <record> --strict
+python scripts/render.py project status --name repro_act --step 2 \
+  --status done --summary "基线 0.867" --link <record>
+
+# 4. 进度定位与 A/B 对照
+python scripts/render.py project list        # 输出"当前卡在 step N"
+python scripts/render.py compare --record-a <A> --record-b <B>
 ```
 
 日志目录结构：
 
 ```
 <log_root>/
-├── INDEX.md              # 全局索引，一实验一行，自动维护
-└── exp_20261103_1430/    # 单次实验目录
-    ├── record.json       # canonical 记录（单一事实源）
-    ├── human.md          # 人版日志
-    └── agent.md          # agent 版日志
+├── INDEX.md                        # 全局实验索引（跨项目），finalize 自动维护
+├── exp_xxx/                        # 独立实验
+└── projects/<项目名>/
+    ├── plan.json / PLAN.md         # 流程 canonical 与渲染产物
+    └── steps/<实验ID>/              # 每步实验：record.json / human.md / agent.md
 ```
 
-脚本仅依赖 Python 标准库，无需安装额外包。
-
-### 强制提醒点
-
-确认日志目录（首次询问并记住默认）→ 开跑前登记目标 → 关键决策时记录 → 失败/重试时记录 → 周期性心跳补记 → 结束时 finalize 并更新全局索引。未记录不会阻塞实验，但会在 finalize 校验报告中暴露并要求补全。
+脚本仅依赖 Python 标准库。finalize 校验含：时间戳乱序/未来时间告警、参数表限行（>10 行 WARN，>15 行 FAIL）、comparison/产物路径存在性、human.md 一屏检查。INDEX 核心指标由 `results.headline` 显式指定，不受字典插入顺序影响。
 
 详细行为约束见 [experiment-logger/SKILL.md](experiment-logger/SKILL.md)。
 

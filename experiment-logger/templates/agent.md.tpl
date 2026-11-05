@@ -1,7 +1,7 @@
 # 实验记录（agent 版，可复现）｜{{title}}
 
 > 实验 ID：{{experiment_id}} ｜ 状态：{{status}} ｜ 创建：{{created_at}} ｜ 更新：{{updated_at}}
-
+{{project_line}}
 ## 复现目标
 
 - 论文：{{goal_paper}}
@@ -60,15 +60,25 @@
 
 {{events_list}}
 
+## 阶段小结（milestones）
+
+{{milestones_list}}
+
 ## 效果
 
 核心指标：{{metrics_inline}}
 
-与参考对照：
+上索引的 headline 指标：{{headline_line}}
+
+与参考对照（含完整出处路径）：
 
 | 指标 | 本实验 | 参考 | 偏差 | 出处 |
 |---|---|---|---|---|
-{{comparison_rows}}
+{{comparison_full_rows}}
+
+## 关键结论（findings）
+
+{{findings_detail}}
 
 ## 产物
 

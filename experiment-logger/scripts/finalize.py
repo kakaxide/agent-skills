@@ -8,22 +8,67 @@
 
 结论：
   PASS  记录完整，双日志已生成
-  WARN  有缺失项（决策缺失、报错未记录等），已生成日志但需补全
-  FAIL  缺少必需字段（results / artifacts 等），--strict 时以非零码退出
+  WARN  有缺失项（决策缺失、报错未记录、时间戳乱序等），已生成日志但需补全
+  FAIL  缺少必需字段，--strict 时以非零码退出
 
 仅使用标准库。
 """
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render import load_record, render, status_emoji  # noqa: E402
+from render import load_record, render, status_emoji, fmt, is_path_like  # noqa: E402
 
 
-def validate(record: dict, warnings: list, errors: list) -> None:
+def parse_ts(s: str):
+    try:
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def check_timestamps(record: dict, warnings: list) -> None:
+    """时间戳校验：乱序 WARN、未来时间 WARN。渲染时由脚本统一按时间排序。"""
+    now_local = datetime.now().astimezone()
+    for key in ("decisions", "failed_attempts", "events", "milestones"):
+        items = record.get(key) or []
+        times = [parse_ts(x.get("time", "")) for x in items]
+        if any(t is None for t in times):
+            warnings.append(f"{key} 存在无法解析的时间戳")
+            continue
+        for t in times:
+            if t > now_local + timedelta(minutes=5):
+                warnings.append(f"{key} 存在未来时间戳: {t.isoformat()}")
+                break
+        ordered = [t for t in times]
+        if ordered != sorted(ordered):
+            warnings.append(f"{key} 时间戳乱序（渲染时已自动按时间排序，建议补录时修正源头）")
+
+
+def check_paths(record: dict, record_dir: Path, warnings: list) -> None:
+    """comparison 引用的路径与产物路径存在性检查。"""
+    for c in record.get("results", {}).get("comparison", []) or []:
+        src = c.get("source") or ""
+        if is_path_like(src):
+            p = Path(src)
+            if not (p.is_absolute() and p.exists()) and not (record_dir / src).exists():
+                warnings.append(f"comparison 出处路径不存在: {src}")
+    for a in record.get("artifacts", []) or []:
+        p = Path(a.get("path", ""))
+        if p.is_absolute():
+            if not p.exists():
+                warnings.append(f"产物路径不存在: {p}")
+        elif not (record_dir / p).exists():
+            warnings.append(f"产物路径不存在（相对记录目录）: {p}")
+
+
+def validate(record: dict, warnings: list, errors: list, record_dir: Path) -> None:
     """按 SKILL.md 的检查点要求校验记录。"""
     required_top = ["experiment_id", "title", "goal", "status", "created_at", "updated_at", "params", "environment", "commands", "results", "artifacts"]
     for k in required_top:
@@ -54,6 +99,26 @@ def validate(record: dict, warnings: list, errors: list) -> None:
     if missing_env:
         warnings.append(f"环境指纹缺失项: {', '.join(missing_env)}")
 
+    # 时间戳与路径
+    check_timestamps(record, warnings)
+    check_paths(record, record_dir, warnings)
+
+
+def post_render_checks(record: dict, human_path: Path, warnings: list, errors: list) -> None:
+    """渲染后检查：参数表行数上限、human.md 一屏。"""
+    n_rows = record.get("_human_param_rows", 0)
+    if n_rows > 15:
+        errors.append(f"人版参数表 {n_rows} 行，超过 15 行上限——把非关键参数移入 config，仅保留偏离默认值的核心参数")
+    elif n_rows > 10:
+        warnings.append(f"人版参数表 {n_rows} 行，超过建议的 10 行——考虑精简")
+
+    try:
+        n_lines = len(human_path.read_text(encoding="utf-8").splitlines())
+    except OSError:
+        return
+    if n_lines > 40:
+        warnings.append(f"human.md 共 {n_lines} 行，超过一屏建议（约 40 行）——检查 comparison/findings 是否堆砌")
+
 
 def update_index(record: dict, exp_dir: Path, log_root: Path) -> None:
     """向 <log_root>/INDEX.md 追加一行实验摘要（幂等：同实验 ID 先移除旧行再追加）。"""
@@ -61,9 +126,18 @@ def update_index(record: dict, exp_dir: Path, log_root: Path) -> None:
     date = (record.get("updated_at") or "")[:10]
     exp_id = record.get("experiment_id", exp_dir.name)
     status = f"{status_emoji(record.get('status', ''))} {record.get('status', '')}"
+
     metrics = record.get("results", {}).get("metrics") or {}
-    summary = "；".join(f"{k}={v}" for k, v in list(metrics.items())[:3]) or "-"
-    row = f"| {date} | {exp_id} | {record.get('title', '')} | {status} | {summary} | [日志](./{exp_id}/human.md) |"
+    headline = record.get("results", {}).get("headline") or []
+    # 核心指标顺序由实验作者决定：优先 headline 字段，缺省退回前 3 个
+    keys = [k for k in headline if k in metrics] or list(metrics.keys())[:3]
+    summary = "；".join(f"{k}={metrics[k]}" for k in keys[:3]) or "-"
+
+    try:
+        rel = exp_dir.resolve().relative_to(log_root.resolve()).as_posix()
+    except ValueError:
+        rel = str(exp_dir)
+    row = f"| {date} | {exp_id} | {record.get('title', '')} | {status} | {summary} | [日志](./{rel}/human.md) |"
 
     header = (
         "# 实验日志索引\n\n"
@@ -96,22 +170,28 @@ def main() -> None:
 
     record_path = Path(args.record)
     record = load_record(record_path)
+    record_dir = record_path.parent
 
     if args.results:
         res = json.loads(Path(args.results).read_text(encoding="utf-8-sig"))
-        record["results"].update(res)
+        record.setdefault("results", {}).update(res)
         record["updated_at"] = record.get("updated_at")
 
     errors: list = []
     warnings: list = []
-    validate(record, warnings, errors)
+    validate(record, warnings, errors, record_dir)
 
     out_dir = Path(args.out_dir) if args.out_dir else record_path.parent
     render(record, out_dir)
+    post_render_checks(record, out_dir / "human.md", warnings, errors)
 
     log_root = Path(args.log_root) if args.log_root else Path(record.get("log_root") or out_dir.parent)
     log_root.mkdir(parents=True, exist_ok=True)
     update_index(record, out_dir, log_root)
+
+    if record.get("project"):
+        print(f"提醒：本实验属于项目 {record['project'].get('name', '')}，"
+              f"完成后用 project status --link {record_path} 更新流程文档。")
 
     print("\n===== finalize 校验报告 =====")
     for e in errors:

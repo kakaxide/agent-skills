@@ -17,5 +17,5 @@
 | 指标 | 本实验 | 参考（{{reference_source}}） | 偏差 |
 |---|---|---|---|
 {{comparison_rows}}
-
+{{findings_section}}{{milestones_section}}
 <!-- 人版仅呈现以上内容。完整命令、环境、失败过程、决策详情见 agent.md -->
